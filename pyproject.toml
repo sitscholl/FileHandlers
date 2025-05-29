@@ -1,0 +1,18 @@
+[project]
+name = "filehandler"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dask[array]>=2025.5.1",
+    "netcdf4>=1.7.2",
+    "rasterio>=1.4.3",
+    "rioxarray>=0.15.0",
+    "xarray>=2024.7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
