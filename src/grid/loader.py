@@ -43,6 +43,12 @@ class GridLoader:
         self.default_attrs.update(attrs)
         return self
 
+    def set_crs(self, epsg: int):
+        """Set the coordinate system of all loaded datasets."""
+        def _set_crs(ds):
+            return ds.rio.write_crs(epsg)
+        return self.add_preprocess_step(_set_crs, "set_crs")
+
     def rename_variables(self, mapping: Dict[str, str]):
         """Add a preprocessing step to rename variables according to mapping."""
         def _rename(ds):
@@ -117,7 +123,7 @@ class GridLoader:
 
         return ds
 
-    def load(self, pattern: str = '*', epsg: Optional[str] = None,
+    def load(self, pattern: str = '*',
              dask: bool = False, preprocess_override: Optional[Callable] = None, **kwargs):
         """
         Load .nc files with flexible preprocessing options.
@@ -150,8 +156,15 @@ class GridLoader:
         else:
             ds = xr.open_mfdataset(files, preprocess=preprocess_func, **kwargs)
 
-        if epsg is not None:
-            logger.debug(f'Coordinate system set to {epsg}')
-            ds = ds.rio.write_crs(epsg)
-
         return ds
+
+class STLoader(GridLoader):
+
+    def __init__(self, root):
+        super().__init__(root)
+
+        self.set_default_attrs({"source": "Crespi (2021): https://doi.org/10.5194/essd-13-2801-2021"}) \
+            .rename_coordinates(x_name="lon", y_name="lat", time_name = 'datetime') \
+            .rename_variables({"tmean": "temperature", "prec": "precipitation"}) \
+            .drop_variables(["transverse_mercator"]) \
+            .set_crs(32632)
