@@ -19,9 +19,13 @@ class GridWriter:
             filename: The name of the output file.
             **kwargs: Additional arguments passed to ds.to_netcdf.
         """
-        output_path = self.root / filename
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not isinstance(data, (xr.DataArray, xr.Dataset)):
+            raise NotImplementedError(f"Unsupported data type {type(data)} for Netcdf conversion.")
 
+        if isinstance(data, xr.DataArray):
+            data = data.to_dataset(name="variable")
+
+        output_path = self.root / filename
         data.to_netcdf(output_path, **kwargs)
 
     def to_geotiff(self, data: xr.DataArray | xr.Dataset, filename: str | list[str], **kwargs):
@@ -34,7 +38,7 @@ class GridWriter:
             **kwargs: Additional arguments passed to da.rio.to_raster.
         """
 
-        if not isinstance(data, xr.DataArray) and not isinstance(data, xr.Dataset):
+        if not isinstance(data, (xr.DataArray, xr.Dataset)):
             raise NotImplementedError(f"Unsupported data type {type(data)} for GeoTIFF conversion.")
 
         if not hasattr(data, 'rio'):
@@ -52,7 +56,6 @@ class GridWriter:
                 output_path = self.root / filename[i]
                 assert_spatial_info(da)
                 da.rio.to_raster(output_path, **kwargs)
-
 
     def to_zarr(
         self,
@@ -75,36 +78,64 @@ class GridWriter:
             The data to be inserted into the Zarr store.
         filename : str or Path
             The path to the Zarr store.
-        append_dims : list of str, optional
+        append_dims : list of str or str, optional
             List of dimensions along which to append data in an existing zarr store.
-        drop_attrs: boolean
+        drop_attrs: boolean, default False
             If true, all attributes of the dataset will be dropped before writing to zarr.
         **kwargs
-            passed on to _ensure_preallocated_store
+            Additional arguments passed to xarray's to_zarr method.
 
         Raises
         ------
         ValueError
-            If the Zarr store does not exist and preallocate_attrs is not provided, or if preallocate_attrs is invalid.
+            If the Zarr store does not exist and append_dims is provided, or if the data is incompatible with the existing store.
         NotImplementedError
-            If attempting to add new variables to an existing Zarr store.
+            If attempting to add new variables to an existing Zarr store or if data type is unsupported.
         """
+        if not isinstance(data, (xr.DataArray, xr.Dataset)):
+            raise NotImplementedError(f"Unsupported data type {type(data)} for zarr conversion.")
 
+        # Convert DataArray to Dataset if needed
         if isinstance(data, xr.DataArray):
             if data.name is None:
                 data.name = 'var'
             data = data.to_dataset()
 
+        # Ensure filename is a Path object
         if isinstance(filename, str):
             filename = Path(filename)
 
+        # Convert string append_dims to list
         if isinstance(append_dims, str):
             append_dims = [append_dims]
 
-        if filename.exists() and append_dims is not None:
-            data_align = ensure_zarr_store_aligns(filename, data, append_dims = append_dims, **kwargs)
+        # Make a copy of the data to avoid modifying the original
+        data_to_write = data.copy()
 
+        # Handle existing Zarr store
+        if filename.exists():
+            if append_dims is not None:
+                # Validate and align with existing store
+                data_to_write = ensure_zarr_store_aligns(filename, data_to_write, append_dims=append_dims)
+                mode = "a"
+                region = "auto"
+            else:
+                # Overwrite existing store if append_dims is None
+                mode = "w"
+                region = None
+        else:
+            # Create new store
+            if append_dims is not None:
+                raise ValueError(f"Cannot append to non-existent Zarr store at {filename}. Store must exist when append_dims is provided.")
+            mode = "w"
+            region = None
+
+        # Drop attributes if requested
         if drop_attrs:
-            data_align = data_align.drop_attrs()
+            data_to_write = data_to_write.drop_attrs()
 
-        data_align.drop_vars('spatial_ref', errors = 'ignore').to_zarr(filename, mode = "a", region = "auto")
+        # Remove spatial_ref variable if present to avoid conflicts
+        data_to_write = data_to_write.drop_vars('spatial_ref', errors='ignore')
+
+        # Write to Zarr store
+        data_to_write.to_zarr(filename, mode=mode, region=region, **kwargs)
