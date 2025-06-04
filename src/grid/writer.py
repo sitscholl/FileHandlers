@@ -1,10 +1,11 @@
+import numpy as np
 import xarray as xr
 import rioxarray
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union, Any
+from typing import Dict, Optional, Tuple, Union, Any, List
 
-from .utils import generate_preallocated_zarr_store, ensure_zarr_store_aligns, assert_spatial_info
+from .utils import ensure_zarr_store_aligns, assert_spatial_info
 
 class GridWriter:
     def __init__(self, root):
@@ -95,6 +96,8 @@ class GridWriter:
         if not isinstance(data, (xr.DataArray, xr.Dataset)):
             raise NotImplementedError(f"Unsupported data type {type(data)} for zarr conversion.")
 
+        assert_spatial_info(data)
+
         # Convert DataArray to Dataset if needed
         if isinstance(data, xr.DataArray):
             if data.name is None:
@@ -104,6 +107,7 @@ class GridWriter:
         # Ensure filename is a Path object
         if isinstance(filename, str):
             filename = Path(filename)
+        filename = self.root / filename
 
         # Convert string append_dims to list
         if isinstance(append_dims, str):
@@ -116,26 +120,88 @@ class GridWriter:
         if filename.exists():
             if append_dims is not None:
                 # Validate and align with existing store
-                data_to_write = ensure_zarr_store_aligns(filename, data_to_write, append_dims=append_dims)
+                ensure_zarr_store_aligns(filename, data_to_write, append_dims=append_dims)
                 mode = "a"
                 region = "auto"
+                drop_vars = True
             else:
+                raise ValueError(f"Found existing zarr store at {filename}. Append_dims must be specified to align with an existing Zarr store.")
                 # Overwrite existing store if append_dims is None
-                mode = "w"
-                region = None
+                # mode = "w"
+                # region = None
+                # drop_vars = False
         else:
             # Create new store
             if append_dims is not None:
                 raise ValueError(f"Cannot append to non-existent Zarr store at {filename}. Store must exist when append_dims is provided.")
             mode = "w"
             region = None
+            drop_vars = False
 
         # Drop attributes if requested
         if drop_attrs:
             data_to_write = data_to_write.drop_attrs()
 
         # Remove spatial_ref variable if present to avoid conflicts
-        data_to_write = data_to_write.drop_vars('spatial_ref', errors='ignore')
+        if drop_vars:
+            data_to_write = data_to_write.drop_vars('spatial_ref', errors='ignore')
 
         # Write to Zarr store
         data_to_write.to_zarr(filename, mode=mode, region=region, **kwargs)
+
+    def generate_preallocated_zarr_store(
+        self,
+        filename: Union[str, Path],
+        shape: Tuple[int, ...],
+        coords: Dict,
+        crs: int,
+        chunks: Optional[Tuple[int, ...]] = None,
+        encoding: Optional[Dict] = None,
+        variables: Optional[Dict[str, type]] = None,
+    ) -> None:
+        """
+        Generate a pre-allocated zarr store with specified dimensions and metadata.
+
+        Args:
+            filename: Path to create zarr store
+            shape: Tuple defining the array dimensions
+            coords: Dictionary of coordinates for each dimension
+            crs: Coordinate Reference System code (EPSG)
+            chunks: Optional tuple specifying chunk sizes
+            encoding: Optional dictionary for zarr encoding settings
+            variables: Optional dictionary mapping variable names to their data types
+
+        Raises:
+            ValueError: If input parameters are invalid
+            RuntimeError: If zarr store creation fails
+        """
+
+        if (self.root / filename).exists():
+            raise ValueError(f"Found existing zarr store at {self.root / filename}.")
+
+        if variables is None:
+            variables = {"variable": float}
+
+        if not isinstance(variables, dict):
+            raise ValueError("The 'variables' parameter must be a dictionary with the following structure: VariableName: VariableType.")
+
+        try:
+            # Create dummy dataset to preallocate a zarr store with necessary metadata but no data
+            dummy = xr.DataArray(np.empty(shape), coords=coords)
+
+            if chunks is not None:
+                if len(chunks) != len(shape):
+                    raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
+                dummy = dummy.chunk(chunks)
+                
+            dummy = dummy.expand_dims({'var': list(variables.keys())}).to_dataset(dim='var')
+
+            dummy = dummy.rio.write_crs(crs)
+
+            for v, dtype in variables.items():
+                dummy[v] = dummy[v].astype(dtype)
+
+            dummy.to_zarr(self.root / filename, mode="w", compute=False, encoding=encoding)
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to create zarr store: {str(e)}") from e
