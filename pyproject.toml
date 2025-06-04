@@ -10,6 +10,7 @@ dependencies = [
     "rasterio>=1.4.3",
     "rioxarray>=0.15.0",
     "xarray>=2024.7.0",
+    "zarr>=3.0.8",
 ]
 
 [dependency-groups]
