@@ -111,6 +111,9 @@ def ensure_zarr_store_aligns(
                     f"Writing to a zarr region slice requires that no dimensions or metadata are changed by the write."
                 )
 
+        if arr.dtype != data[vname].dtype:
+            raise ValueError(f"Dtypes between old and new variable '{vname}' do not match. Got {arr.dtype} and {data[vname].dtype}.")
+
     logger.debug("Existing variable in zarr store is correctly aligned with new data.")
 
 
