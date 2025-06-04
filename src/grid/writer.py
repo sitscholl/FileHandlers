@@ -59,10 +59,10 @@ class GridWriter:
 
     def to_zarr(
         self,
-        data,
-        filename,
-        append_dims=None,
-        drop_attrs=False,
+        data: Union[xr.Dataset, xr.DataArray],
+        filename: Union[str, Path],
+        append_dims: Optional[List[str]] = None,
+        drop_attrs: bool =False,
         **kwargs,
     ):
         """
