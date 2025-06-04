@@ -2,16 +2,15 @@ import xarray as xr
 import rioxarray
 
 from pathlib import Path
-import logging
 from typing import Callable, Dict, List, Optional, Union, Any
 
-from .utils import generate_preallocated_zarr_store, ensure_zarr_store_aligns
+from .utils import generate_preallocated_zarr_store, ensure_zarr_store_aligns, assert_spatial_info
 
 class GridWriter:
     def __init__(self, root):
         self.root = Path(root)
 
-    def to_netcdf(self, ds: xr.Dataset, filename: str, **kwargs):
+    def to_netcdf(self, data: xr.Dataset, filename: str, **kwargs):
         """
         Write an xarray Dataset to a NetCDF file.
 
@@ -23,10 +22,9 @@ class GridWriter:
         output_path = self.root / filename
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        ds.to_netcdf(output_path, **kwargs)
-        logging.info(f"Data written to {output_path}")
+        data.to_netcdf(output_path, **kwargs)
 
-    def to_geotiff(self, da: xr.DataArray | xr.Dataset, filename: str, **kwargs):
+    def to_geotiff(self, data: xr.DataArray | xr.Dataset, filename: str | list[str], **kwargs):
         """
         Write an xarray DataArray to a GeoTIFF file.
 
@@ -36,21 +34,28 @@ class GridWriter:
             **kwargs: Additional arguments passed to da.rio.to_raster.
         """
 
-        if not hasattr(da, 'rio'):
+        if not isinstance(data, xr.DataArray) and not isinstance(data, xr.Dataset):
+            raise NotImplementedError(f"Unsupported data type {type(data)} for GeoTIFF conversion.")
+
+        if not hasattr(data, 'rio'):
             raise ValueError("DataArray must have spatial information (rioxarray extension) to save to geotiff.")
 
-        if isinstance(da, xr.DataArray):
-            da = da.to_dataset(name='')
+        if isinstance(data, xr.DataArray):
+            assert_spatial_info(data)
+            data.rio.to_raster(self.root / filename, **kwargs)
+        elif isinstance(data, xr.Dataset):
+            if isinstance(filename, str):
+                filename = [filename]
+            if len(data.data_vars) != len(filename):
+                raise ValueError(f"Number of filenames must match the number of data variables in the Dataset. Got {len(filename)} filenames for {len(data.data_vars)} data variables.")  
+            for i, (nam, da) in enumerate(data.data_vars.items()):
+                output_path = self.root / filename[i]
+                assert_spatial_info(da)
+                da.rio.to_raster(output_path, **kwargs)
 
-        for nam, da in da.data_vars.items():
-            output_path = Path(self.root, filename.replace('.tif', f'_{nam}.tif'))
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            da.rio.to_raster(output_path, **kwargs)
-
-        logging.info(f"Data written to {output_path}")
 
     def to_zarr(
+        self,
         data,
         filename,
         append_dims=None,
