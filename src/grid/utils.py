@@ -1,57 +1,87 @@
+"""Utility functions for managing Zarr stores for geospatial data.
+
+This module provides functions for creating, validating, and working with
+Zarr stores that contain geospatial data using xarray and rioxarray.
+"""
+
+import logging
+from pathlib import Path
+from typing import Dict, Optional, Tuple, Union, Any, List
+
+import numpy as np
 import xarray as xr
 import rioxarray
-import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def generate_preallocated_zarr_store(
-    filename,
-    shape,
-    coords,
-    chunks: tuple = None,
-    crs: int = None,
-    encoding=None,
-    vars: dict[str, type] = None,
-):
+    filename: Union[str, Path],
+    shape: Tuple[int, ...],
+    coords: Dict,
+    crs: int,
+    chunks: Optional[Tuple[int, ...]] = None,
+    encoding: Optional[Dict] = None,
+    variables: Optional[Dict[str, type]] = None,
+) -> None:
+    """
+    Generate a pre-allocated zarr store with specified dimensions and metadata.
 
-    if vars is None:
-        vars = {"variable": float}
+    Args:
+        filename: Path to create zarr store
+        shape: Tuple defining the array dimensions
+        coords: Dictionary of coordinates for each dimension
+        crs: Coordinate Reference System code (EPSG)
+        chunks: Optional tuple specifying chunk sizes
+        encoding: Optional dictionary for zarr encoding settings
+        variables: Optional dictionary mapping variable names to their data types
 
-    # Create dummy dataset to preallocate a zarr store with necessary metadata but no data
-    dummy = xr.DataArray(np.empty(shape), coords=coords)
+    Raises:
+        ValueError: If input parameters are invalid
+        RuntimeError: If zarr store creation fails
+    """
 
-    if chunks is not None:
-        dummy = dummy.chunk(chunks)
-        
-    dummy = dummy.expand_dims({'var': list(vars.keys())}).to_dataset(dim='var')
+    if variables is None:
+        variables = {"variable": float}
 
-    if crs is not None:
+    try:
+        # Create dummy dataset to preallocate a zarr store with necessary metadata but no data
+        dummy = xr.DataArray(np.empty(shape), coords=coords)
+
+        if chunks is not None:
+            if len(chunks) != len(shape):
+                raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
+            dummy = dummy.chunk(chunks)
+            
+        dummy = dummy.expand_dims({'var': list(variables.keys())}).to_dataset(dim='var')
+
         dummy = dummy.rio.write_crs(crs)
 
-    for v, dtype in vars.items():
-        dummy[v] = dummy[v].astype(dtype)
+        for v, dtype in variables.items():
+            dummy[v] = dummy[v].astype(dtype)
 
-    dummy.to_zarr(filename, mode="w", compute=False, encoding=encoding)
+        dummy.to_zarr(filename, mode="w", compute=False, encoding=encoding)
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to create zarr store: {str(e)}") from e
 
 
-def ensure_zarr_store_aligns():
+def ensure_zarr_store_aligns(
+    path: Union[str, Path], 
+    data: Union[xr.Dataset, xr.DataArray], 
+    append_dims: Optional[List[str]] = None
+) -> None:
     """
-    Ensures that an existing Zarr store is correctly preallocated and aligns with ds_new for appending data.
-    If align is true, ds_new will be reprojected to match the coordinate values of the existing zarr store.
-
+    Ensures that an existing Zarr store is correctly preallocated and aligns with new data for appending.
+    
     Parameters
     ----------
-    zarr_path : Path
+    path : Path or str
         The path to the Zarr store.
-    ds_new : xr.Dataset
+    data : xr.Dataset or xr.DataArray
         The new data to be appended.
-    append_dims : list of str
-        List of dimensions along which data will be appended.
-    align: boolean
-        Boolean indicating if ds_new should be reprojected to match coordinate values in existing zarr store
-    crs_existing: pyproj.CRS
-        If the existing zarr store has no crs, this crs will be set.
-    **kwargs
-        Passed on to alignment.align_arrays
+    append_dims : List[str], optional
+        List of dimensions along which data will be appended. Default is None (empty list).
 
     Raises
     ------
@@ -59,58 +89,82 @@ def ensure_zarr_store_aligns():
         If the existing dataset dimensions or chunks do not match the expected dimensions or chunks,
         or if not all values of a coordinate in append_dims are present in the existing dataset.
     NotImplementedError
-        If attempting to add new variables to an existing Zarr store.
+        If attempting to add new variables to an existing Zarr store or if data type is unsupported.
     ValueError
         If the zarr store does not exist.
+        
+    Returns
+    -------
+    xr.Dataset
+        The validated dataset ready for appending
     """
-    if zarr_path.exists():
-        ds_existing = xr.open_zarr(zarr_path)
-        if ds_existing.rio.crs is None and crs_existing is not None:
-            logger.debug(f'Setting manual crs on zarr store: {crs_existing}')
-            ds_existing = ds_existing.rio.write_crs(crs_existing)
 
-        ##Check if crs is equal
-        if ds_existing.rio.crs != ds_new.rio.crs:
-            raise ValueError(f"Coordinate systems of ds_existing and ds_new are not equal! Got {ds_existing.rio.crs} vs {ds_new.rio.crs}")
+    if not isinstance(data, (xr.DataArray, xr.Dataset)):
+        raise NotImplementedError(f"Unsupported data type {type(data)} for Zarr store operations.")
 
-        for vname in list(ds_new.keys()):
+    if isinstance(data, xr.DataArray):
+        data = data.to_dataset(name="variable")
+        
+    if append_dims is None:
+        append_dims = []
 
-            if vname in ds_existing:
-                arr = ds_existing[vname]
-                existing_dims = {i:j for i,j in arr.sizes.items() if i not in append_dims}
-                new_dims = {i:j for i,j in ds_new[vname].sizes.items() if i not in append_dims}
+    if not Path(path).exists():
+        raise ValueError(f"Zarr store at {path} does not exist.")
+        
+    ds_existing = xr.open_zarr(path)
+    
+    if ds_existing.rio.crs is None:
+        logger.warning("CRS for the existing zarr store is not set.")
+    elif ds_existing.rio.crs != data.rio.crs:
+        raise ValueError(
+            f"Coordinate systems of existing store and data are not equal! "
+            f"Got {ds_existing.rio.crs} vs {data.rio.crs}"
+        )
 
-                ##Check if dimension names and shapes match
-                if existing_dims != new_dims:
-                    raise ValueError(f"Existing dataset dimensions and shapes {existing_dims} do not match expected {new_dims}.")
+    for vname in list(data.keys()):
+        if vname not in ds_existing:
+            raise NotImplementedError(
+                f"Found existing zarr store but variable '{vname}' is not present. "
+                f"Adding new variables is not supported."
+            )
+            
+        arr = ds_existing[vname]
+        existing_dims = {i: j for i, j in arr.sizes.items() if i not in append_dims}
+        new_dims = {i: j for i, j in data[vname].sizes.items() if i not in append_dims}
 
-                ##Check if dimension values are equal
-                dims_unequal = {i: not ds_new[i].equals(arr[i]) for i in existing_dims.keys()}
-                if any(dims_unequal.values()):
-                    if not align:
-                        raise ValueError(f"Cannot insert in zarr store if dimensions are not equal. Unequal values found for dimensions {dims_unequal}.")
-                    else:
-                        logger.debug(f"Unequal values found for dimensions {dims_unequal}. Reprojecting...")
-                        ds_new = align_arrays(ds_new, base = arr, **kwargs)[0]
+        # Check if dimension names and shapes match
+        if existing_dims != new_dims:
+            raise ValueError(
+                f"Existing dataset dimensions and shapes {existing_dims} "
+                f"do not match expected {new_dims}."
+            )
 
-                ##Check if chunking is equal
-                if arr.chunks and ds_new[vname].chunks and  arr.chunks != ds_new[vname].chunks:
-                    raise ValueError(f"Existing dataset chunks {arr.chunks} do not match expected {ds_new[vname].chunks}.")
+        # Check if dimension values are equal
+        dims_unequal = {i: not data[i].equals(arr[i]) for i in existing_dims.keys()}
+        if any(dims_unequal.values()):
+            raise ValueError(
+                f"Cannot insert in zarr store if dimensions are not equal. "
+                f"Unequal values found for dimensions {dims_unequal}."
+            )
 
-                ##Check if all values of append_dim are present in existing dataset
-                for i in append_dims:
-                    if not ds_new[i].isin(arr[i]).all():
-                        raise ValueError(f"Not all values of coordinate {i} are present in existing dataset. Writing to a zarr region slice requires that no dimensions or metadata are changed by the write.")
+        # Check if chunking is equal
+        if arr.chunks and data[vname].chunks and arr.chunks != data[vname].chunks:
+            raise ValueError(
+                f"Existing dataset chunks {arr.chunks} do not match expected {data[vname].chunks}."
+            )
 
-                logger.debug("Existing variable in zarr store is correctly aligned with new data.")
-                return ds_new
+        # Check if all values of append_dim are present in existing dataset
+        for i in append_dims:
+            if not data[i].isin(arr[i]).all():
+                raise ValueError(
+                    f"Not all values of append_dim {i} are present in existing dataset. "
+                    f"Writing to a zarr region slice requires that no dimensions or metadata are changed by the write."
+                )
 
-            else:
-                raise NotImplementedError(f"Found existing zarr store but variable '{vname}' is not present. Adding new variables is not supported.")       
-    else:
-        raise ValueError(f"zarr store at {zarr_path} does not exist. Create one before using _ensure_preallocated_store.")
+    logger.debug("Existing variable in zarr store is correctly aligned with new data.")
 
-def assert_spatial_info(da):
+
+def assert_spatial_info(da: xr.DataArray) -> bool:
     """
     Check if a DataArray has proper spatial information.
     
@@ -119,14 +173,17 @@ def assert_spatial_info(da):
         
     Returns:
         bool: True if spatial info is complete
+        
+    Raises:
+        ValueError: If spatial dimensions are not set or CRS is missing
     """
     try:
-        # This will raise an exception if spatial dims aren't set
-        x_dim = da.rio.x_dim
-        y_dim = da.rio.y_dim
-                    
-    except rioxarray.exceptions.MissingSpatialDimensionError:
-        raise ValueError('MissingSpatialDimensionError. Use "da.rio.set_spatial_dims(x_dim="x", y_dim="y")" to set the dimensions.')
+        # Check if spatial dimensions are set        # Just accessing these properties will raise an exception if not set        da.rio.x_dim
+        da.rio.y_dim
+    except rioxarray.exceptions.MissingSpatialDimensionError as exc:
+        raise ValueError(
+            'MissingSpatialDimensionError. Use "da.rio.set_spatial_dims(x_dim="x", y_dim="y")" to set the dimensions.'
+        ) from exc
 
     # Check if CRS is set
     if da.rio.crs is None:
