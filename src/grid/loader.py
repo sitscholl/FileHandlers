@@ -152,7 +152,13 @@ class GridLoader:
 
         logger.info(f"Loading {len(files)} files...")
         if not dask:
-            ds = xr.merge([_load_nc(f) for f in files], **kwargs)
+            # Load and preprocess each file
+            datasets = [_load_nc(f) for f in files]
+            # Merge the datasets
+            ds = xr.merge(datasets, **kwargs)
+            # Preserve CRS information from the first dataset if available
+            if datasets and hasattr(datasets[0], 'rio') and hasattr(datasets[0].rio, 'crs') and datasets[0].rio.crs:
+                ds = ds.rio.write_crs(datasets[0].rio.crs)
         else:
             ds = xr.open_mfdataset(files, preprocess=preprocess_func, **kwargs)
 
