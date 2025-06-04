@@ -164,7 +164,7 @@ class STLoader(GridLoader):
         super().__init__(root)
 
         self.set_default_attrs({"source": "Crespi (2021): https://doi.org/10.5194/essd-13-2801-2021"}) \
-            .rename_coordinates(x_name="lon", y_name="lat", time_name = 'datetime') \
+            .rename_coordinates(x_name="lon", y_name="lat", time_name = 'time') \
             .rename_variables({"tmean": "temperature", "prec": "precipitation"}) \
             .drop_variables(["transverse_mercator"]) \
             .set_crs(32632)
