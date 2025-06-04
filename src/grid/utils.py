@@ -109,3 +109,27 @@ def ensure_zarr_store_aligns():
                 raise NotImplementedError(f"Found existing zarr store but variable '{vname}' is not present. Adding new variables is not supported.")       
     else:
         raise ValueError(f"zarr store at {zarr_path} does not exist. Create one before using _ensure_preallocated_store.")
+
+def assert_spatial_info(da):
+    """
+    Check if a DataArray has proper spatial information.
+    
+    Args:
+        da: xarray.DataArray to check
+        
+    Returns:
+        bool: True if spatial info is complete
+    """
+    try:
+        # This will raise an exception if spatial dims aren't set
+        x_dim = da.rio.x_dim
+        y_dim = da.rio.y_dim
+                    
+    except rioxarray.exceptions.MissingSpatialDimensionError:
+        raise ValueError('MissingSpatialDimensionError. Use "da.rio.set_spatial_dims(x_dim="x", y_dim="y")" to set the dimensions.')
+
+    # Check if CRS is set
+    if da.rio.crs is None:
+        raise ValueError('CRS not set. Use "da.rio.write_crs()" to set the CRS.')
+
+    return True
