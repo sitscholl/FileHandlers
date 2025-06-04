@@ -245,52 +245,211 @@ def test_generate_preallocated_zarr_store(writer: GridWriter, tmp_path: Path):
         assert ds_read.chunks == {'time': (10,), 'x': (2, 2, 1), 'y': (2, 2, 1)}, "Chunks not preserved in Zarr store."
         assert list(ds_read.data_vars) == list(var_dict.keys()), "Data variables not preserved in Zarr store."
 
-        assert ds_read['var1'].shape == shape, "Dimensions of var 1not preserved in Zarr store."
-        assert ds_read['var2'].shape == shape, "Dimensions of var 2not preserved in Zarr store."
+        assert ds_read['var1'].shape == shape, "Dimensions of var1 not preserved in Zarr store."
+        assert ds_read['var2'].shape == shape, "Dimensions of var2 not preserved in Zarr store."
 
         assert ds_read['var1'].dtype == float, "Data type of 'var1' not preserved in Zarr store."
         assert ds_read['var2'].dtype == int, "Data type of 'var2' not preserved in Zarr store."
 
-# def test_generate_preallocated_zarr_store_encoding(tmp_path: Path):
-#     """Tests generating a preallocated Zarr store."""
-#     def get_directory_size(path: Path) -> int:
-#         """Calculate total size of a directory in bytes"""
-#         total = 0
-#         for dirpath, _, filenames in os.walk(path):
-#             for filename in filenames:
-#                 filepath = Path(dirpath) / filename
-#                 total += filepath.stat().st_size
-#         return total
 
-#     shape = (10, 5000, 5000)  # Example shape: (time, height, width)
-#     coords = {
-#         "time": np.arange(shape[0]),
-#         "x": np.linspace(-100, -95, shape[2]),
-#         "y": np.linspace(30, 25, shape[1]),
-#     }
-#     var_dict = {'var1': float, 'var2': int}
-#     encoding = {var: {"compressors": BloscCodec(cname="zstd", clevel=3, shuffle="shuffle")} for var in var_dict.keys()}
+def test_generate_preallocated_zarr_store_dtype_encoding(writer: GridWriter, tmp_path: Path):
+    """Tests generating a preallocated Zarr store with dtype encoding."""
+    shape = (10, 5, 5)  # Example shape: (time, height, width)
+    coords = {
+        "time": np.arange(shape[0]),
+        "x": np.linspace(-100, -95, shape[2]),
+        "y": np.linspace(30, 25, shape[1]),
+    }
+    var_dict = {'var1': float, 'var2': int}
+    
+    # Test explicit dtype encoding
+    encoding = {
+        'var1': {'dtype': 'float32'},  # Downcast from float64 to float32
+        'var2': {'dtype': 'int16'}     # Downcast from int64 to int16
+    }
 
-#     zarr_path_encoded = tmp_path / "encoded_store.zarr"
-#     zarr_path_normal =  tmp_path / "normal_store.zarr"
-#     generate_preallocated_zarr_store(
-#         zarr_path_encoded,
-#         shape = shape,
-#         coords = coords,
-#         crs = 4326,
-#         encoding = encoding,
-#         variables = var_dict
-#     )
-#     generate_preallocated_zarr_store(
-#         zarr_path_normal,
-#         shape = shape,
-#         coords = coords,
-#         crs = 4326,
-#         encoding = None,
-#         variables = var_dict
-#     )
+    filename = "dtype_encoded_store.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = shape,
+        coords = coords,
+        crs = 4326,
+        encoding = encoding,
+        variables = var_dict
+    )
 
-#     assert get_directory_size(zarr_path_normal) > get_directory_size(zarr_path_encoded), "Normal Zarr store size should be greater than encoded Zarr store size."
+    zarr_path = tmp_path / filename
+
+    assert zarr_path.exists(), f"Zarr store {zarr_path} was not created."
+    
+    with xr.open_zarr(zarr_path, decode_coords = 'all') as ds_read:
+        # Check that the dtypes were properly encoded
+        assert ds_read['var1'].dtype == np.dtype('float32'), "Dtype encoding for 'var1' not applied correctly."
+        assert ds_read['var2'].dtype == np.dtype('int16'), "Dtype encoding for 'var2' not applied correctly."
+        
+        # Verify other properties are still preserved
+        assert ds_read.rio.crs.to_epsg() == 4326, "CRS not preserved in Zarr store with dtype encoding."
+        assert all([i in list(var_dict.keys()) for i in list(ds_read.data_vars)]), "Data variables not preserved in Zarr store with dtype encoding."
+
+def test_generate_preallocated_zarr_store_scale_factor(writer: GridWriter, tmp_path: Path):
+    """Tests generating a preallocated Zarr store with scale_factor encoding."""
+    shape = (10, 5, 5)  # Example shape: (time, height, width)
+    coords = {
+        "time": np.arange(shape[0]),
+        "x": np.linspace(-100, -95, shape[2]),
+        "y": np.linspace(30, 25, shape[1]),
+    }
+    var_dict = {'var1': float}
+    
+    # Test scale_factor and add_offset encoding
+    encoding = {
+        'var1': {
+            'dtype': 'int16',
+            'scale_factor': 0.1,
+            'add_offset': 0.0,
+            '_FillValue': -9999
+        }
+    }
+
+    filename = "scale_factor_store.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = shape,
+        coords = coords,
+        crs = 4326,
+        encoding = encoding,
+        variables = var_dict
+    )
+
+    zarr_path = tmp_path / filename
+
+    assert zarr_path.exists(), f"Zarr store {zarr_path} was not created."
+    
+    # Open the zarr store and check encoding attributes
+    with xr.open_zarr(zarr_path, decode_coords = 'all') as ds_read:
+        # Check that the encoding was properly applied
+        var1_encoding = ds_read['var1'].encoding
+        assert 'scale_factor' in var1_encoding, "scale_factor not found in encoding"
+        assert var1_encoding['scale_factor'] == 0.1, "scale_factor value not preserved"
+        assert 'add_offset' in var1_encoding, "add_offset not found in encoding"
+        assert var1_encoding['add_offset'] == 0.0, "add_offset value not preserved"
+        assert '_FillValue' in var1_encoding, "_FillValue not found in encoding"
+        assert var1_encoding['_FillValue'] == -9999, "_FillValue not preserved"
+        
+        # Check that the dtype was properly encoded
+        assert ds_read['var1'].dtype == np.dtype('float64'), "Data is decoded to float with scale_factor applied"
+
+    # Open the zarr store without decoding and check dtype
+    with xr.open_zarr(zarr_path, decode_cf = False) as ds_read:
+        assert ds_read['var1'].dtype == np.dtype('int16'), "Data is decoded to float with scale_factor applied"
+
+
+def test_generate_preallocated_zarr_store_compression(writer: GridWriter, tmp_path: Path):
+    """Tests generating a preallocated Zarr store with compression encoding."""
+    shape = (10, 5, 5)  # Example shape: (time, height, width)
+    coords = {
+        "time": np.arange(shape[0]),
+        "x": np.linspace(-100, -95, shape[2]),
+        "y": np.linspace(30, 25, shape[1]),
+    }
+    var_dict = {'var1': float, 'var2': int}
+    
+    # Test compression settings
+    encoding = {
+        'var1': {
+            'compressor': BloscCodec(cname="zstd", clevel=3, shuffle="shuffle"),  # zlib compression
+            'dtype': 'float32'
+        },
+        'var2': {
+            'compressor': BloscCodec(cname="zstd", clevel=9, shuffle="shuffle"),  # higher compression level
+            'dtype': 'int32'
+        }
+    }
+
+    filename = "compression_store.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = shape,
+        coords = coords,
+        crs = 4326,
+        encoding = encoding,
+        variables = var_dict
+    )
+
+    zarr_path = tmp_path / filename
+
+    assert zarr_path.exists(), f"Zarr store {zarr_path} was not created."
+    
+    # Open the zarr store and check encoding
+    with xr.open_zarr(zarr_path, decode_coords = 'all') as ds_read:
+        # Check that the dtypes were properly encoded
+        assert ds_read['var1'].dtype == np.dtype('float32'), "Dtype encoding for 'var1' not applied correctly."
+        assert ds_read['var2'].dtype == np.dtype('int32'), "Dtype encoding for 'var2' not applied correctly."
+        
+        # Verify other properties are still preserved
+        assert ds_read.rio.crs.to_epsg() == 4326, "CRS not preserved in Zarr store with compression encoding."
+
+
+def test_generate_preallocated_zarr_store_chunking_with_encoding(writer: GridWriter, tmp_path: Path):
+    """Tests generating a preallocated Zarr store with both chunking and encoding."""
+    shape = (10, 5, 5)  # Example shape: (time, height, width)
+    coords = {
+        "time": np.arange(shape[0]),
+        "x": np.linspace(-100, -95, shape[2]),
+        "y": np.linspace(30, 25, shape[1]),
+    }
+    chunks = {'time': 2, 'x': 2, 'y': 2}  # Explicit chunks for all dimensions
+    var_dict = {'var1': float, 'var2': int}
+    
+    # Combine chunking with encoding
+    encoding = {
+        'var1': {
+            'dtype': 'float32',
+            'scale_factor': 0.01,
+            '_FillValue': -9999.0
+        },
+        'var2': {
+            'dtype': 'int16',
+            'compressor': BloscCodec(cname="zstd", clevel=3, shuffle="shuffle")
+        }
+    }
+
+    filename = "chunked_encoded_store.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = shape,
+        coords = coords,
+        crs = 4326,
+        chunks = chunks,
+        encoding = encoding,
+        variables = var_dict
+    )
+
+    zarr_path = tmp_path / filename
+
+    assert zarr_path.exists(), f"Zarr store {zarr_path} was not created."
+    
+    with xr.open_zarr(zarr_path, decode_coords = 'all') as ds_read:
+        # Check that chunks were properly applied
+        assert ds_read.chunks == {'time': (2, 2, 2, 2, 2), 'x': (2, 2, 1), 'y': (2, 2, 1)}, "Chunks not preserved correctly."
+        
+        # Check that encoding was properly applied
+        assert ds_read['var1'].dtype == np.dtype('float64'), "Dtype encoding for 'var1' not applied correctly."
+        assert ds_read['var2'].dtype == np.dtype('int16'), "Dtype encoding for 'var2' not applied correctly."
+        
+        # Check scale_factor encoding
+        var1_encoding = ds_read['var1'].encoding
+        assert 'scale_factor' in var1_encoding, "scale_factor not found in encoding"
+        assert var1_encoding['scale_factor'] == 0.01, "scale_factor value not preserved"
+        assert '_FillValue' in var1_encoding, "_FillValue not found in encoding"
+        
+        # Verify CRS is still preserved
+        assert ds_read.rio.crs.to_epsg() == 4326, "CRS not preserved in Zarr store with chunking and encoding."
+
+    #check dtypes without decoding
+    with xr.open_zarr(zarr_path, decode_cf = False) as ds_read:
+        assert ds_read['var1'].dtype == np.dtype('float32'), "Dtype encoding for 'var1' not saved correctly."
+        assert ds_read['var2'].dtype == np.dtype('int16'), "Dtype encoding for 'var2' not saved correctly."
 
 
 def test_to_zarr_append_new_variable_raise(writer: GridWriter, tmp_path: Path):
@@ -394,6 +553,31 @@ def test_to_zarr_overwrite_along_dimension(writer: GridWriter, tmp_path: Path):
         assert ds["data"].shape[0] == 3, f"Expected 3 time steps after append, got {ds['data'].shape[0]}."
         assert all(t in ds.time.dt.date.values for t in all_time_coords), "Not all time coordinates present after append."
         assert ds.chunks['time'][0] == len(all_time_coords)
+
+def test_to_zarr_different_dtypes(writer: GridWriter, tmp_path: Path):
+    """Make sure error is raised when dtypes in existing zarr store differ from new dtypes."""
+    # Create initial dataset with time dimension
+    time_coords = [np.datetime64("2023-01-01"), np.datetime64("2023-01-02")]
+    bands, height, width = 1, 4, 4
+
+    da1 = create_sample_dataarray(name="data", num_bands=bands, height=height, width=width)
+    da1 = da1.expand_dims({"time": time_coords})
+    da1 = da1.astype(int)
+    
+    filename = "append_test.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = (len(time_coords), height, width),
+        coords = {'time': time_coords, 'x': da1.x, 'y': da1.y},
+        crs = da1.rio.crs.to_epsg(),
+        chunks = {'time': -1, 'x': 2, 'y': 2},
+        variables = {"data": float}
+    )
+    
+    # Write initial data
+    with pytest.raises(Exception) as excinfo:
+        writer.to_zarr(da1, filename, append_dims=["time"])
+
 
 def test_to_zarr_drop_attrs(writer: GridWriter, tmp_path: Path):
     """Tests writing to Zarr with drop_attrs=True."""
