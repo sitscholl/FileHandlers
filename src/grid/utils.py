@@ -15,57 +15,7 @@ import rioxarray
 logger = logging.getLogger(__name__)
 
 
-def generate_preallocated_zarr_store(
-    filename: Union[str, Path],
-    shape: Tuple[int, ...],
-    coords: Dict,
-    crs: int,
-    chunks: Optional[Tuple[int, ...]] = None,
-    encoding: Optional[Dict] = None,
-    variables: Optional[Dict[str, type]] = None,
-) -> None:
-    """
-    Generate a pre-allocated zarr store with specified dimensions and metadata.
-
-    Args:
-        filename: Path to create zarr store
-        shape: Tuple defining the array dimensions
-        coords: Dictionary of coordinates for each dimension
-        crs: Coordinate Reference System code (EPSG)
-        chunks: Optional tuple specifying chunk sizes
-        encoding: Optional dictionary for zarr encoding settings
-        variables: Optional dictionary mapping variable names to their data types
-
-    Raises:
-        ValueError: If input parameters are invalid
-        RuntimeError: If zarr store creation fails
-    """
-
-    if variables is None:
-        variables = {"variable": float}
-
-    try:
-        # Create dummy dataset to preallocate a zarr store with necessary metadata but no data
-        dummy = xr.DataArray(np.empty(shape), coords=coords)
-
-        if chunks is not None:
-            if len(chunks) != len(shape):
-                raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
-            dummy = dummy.chunk(chunks)
-            
-        dummy = dummy.expand_dims({'var': list(variables.keys())}).to_dataset(dim='var')
-
-        dummy = dummy.rio.write_crs(crs)
-
-        for v, dtype in variables.items():
-            dummy[v] = dummy[v].astype(dtype)
-
-        dummy.to_zarr(filename, mode="w", compute=False, encoding=encoding)
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to create zarr store: {str(e)}") from e
-
-
+##TODO: Check if dtypes between old and new data corresponds
 def ensure_zarr_store_aligns(
     path: Union[str, Path], 
     data: Union[xr.Dataset, xr.DataArray], 
@@ -111,7 +61,7 @@ def ensure_zarr_store_aligns(
     if not Path(path).exists():
         raise ValueError(f"Zarr store at {path} does not exist.")
         
-    ds_existing = xr.open_zarr(path)
+    ds_existing = xr.open_zarr(path, decode_coords = 'all')
     
     if ds_existing.rio.crs is None:
         logger.warning("CRS for the existing zarr store is not set.")
@@ -140,7 +90,7 @@ def ensure_zarr_store_aligns(
             )
 
         # Check if dimension values are equal
-        dims_unequal = {i: not data[i].equals(arr[i]) for i in existing_dims.keys()}
+        dims_unequal = {i: not np.array_equal(data[i].values, arr[i].values) for i in existing_dims.keys()}
         if any(dims_unequal.values()):
             raise ValueError(
                 f"Cannot insert in zarr store if dimensions are not equal. "
