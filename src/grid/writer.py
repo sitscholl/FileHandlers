@@ -53,19 +53,16 @@ class GridWriter:
     def to_zarr(
         data,
         filename,
-        preallocate_attrs=None,
-        append_dims=[],
-        overwrite=False,
+        append_dims=None,
         drop_attrs=False,
         **kwargs,
     ):
         """
-        Inserts data into a Zarr store, either by appending to an existing store or creating a new one.
-        If preallocate_attrs is given, a new zarr store with the shape, dimensions and chunks specified will be
-        created. Inserting of new variables to an existing store is currently not supported and will raise an error.
+        Inserts data into a Zarr store, either by appending to an existing store or creating a new one. To
+        insert into an existing store, append_dims must be specified.
+        Inserting of new variables to an existing store is currently not supported and will raise an error.
         If the zarr store already exists, the function will check if the new data is compatible with the
-        existing store.
-        If not, an error will be raised.
+        existing store and raise an error if not.
 
         Parameters
         ----------
@@ -73,16 +70,8 @@ class GridWriter:
             The data to be inserted into the Zarr store.
         filename : str or Path
             The path to the Zarr store.
-        preallocate_attrs : dict, optional
-            Attributes for preallocating a new Zarr store. Required if the store does not exist.
-            Must contain keys 'shape', 'coords', and 'chunks'. Optionally, a key 'crs' can be specified
-            to attach a coordinate system to the zarr store as well as a key 'encoding',
-            indicating how the zarr store should be encoded. This should be a dictionary including relevant keys
-            such as compressor, scale_factor or _FillValue.
         append_dims : list of str, optional
-            List of dimensions along which to append data.
-        overwrite : bool, optional
-            Whether to overwrite an existing Zarr store. Defaults to False.
+            List of dimensions along which to append data in an existing zarr store.
         drop_attrs: boolean
             If true, all attributes of the dataset will be dropped before writing to zarr.
         **kwargs
@@ -107,13 +96,10 @@ class GridWriter:
         if isinstance(append_dims, str):
             append_dims = [append_dims]
 
-        if not filename.exists() and preallocate_attrs is None:
-            raise ValueError(f"File {filename} does not exist and preallocate_attrs is None. Either use an existing file where new data should be inserted or specify preallocate_attrs to create a new file.")
+        if filename.exists() and append_dims is not None:
+            data_align = ensure_zarr_store_aligns(filename, data, append_dims = append_dims, **kwargs)
 
-        if preallocate_attrs is not None and (not filename.exists() or overwrite):
-            generate_preallocated_zarr_store()
-
-        data_align = _ensure_preallocated_store(filename, data, append_dims = append_dims, **kwargs)
         if drop_attrs:
             data_align = data_align.drop_attrs()
-        data_align.drop_vars('spatial_ref', errors = 'ignore').to_zarr(filename, mode="a", region = "auto")
+
+        data_align.drop_vars('spatial_ref', errors = 'ignore').to_zarr(filename, mode = "a", region = "auto")
