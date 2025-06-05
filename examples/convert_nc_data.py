@@ -6,8 +6,8 @@ import rioxarray
 import xarray as xr
 from zarr.codecs import BloscCodec
 
-from src.grid.loader import STLoader
-from src.grid.writer import GridWriter
+from filehandler.grid.loader import STLoader
+from filehandler.grid.writer import GridWriter
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)

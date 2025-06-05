@@ -9,7 +9,7 @@ from pathlib import Path
 from zarr.codecs import BloscCodec
 import os
 
-from src.grid.writer import GridWriter
+from filehandler.grid.writer import GridWriter
 
 # Fixture for GridWriter instance
 @pytest.fixture
