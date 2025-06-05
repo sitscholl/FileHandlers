@@ -144,7 +144,7 @@ class GridWriter:
 
         # Remove spatial_ref variable if present to avoid conflicts
         if drop_vars:
-            data_to_write = data_to_write.drop_vars('spatial_ref', errors='ignore')
+            data_to_write = data_to_write.drop_vars(['spatial_ref', 'transverse_mercator'], errors='ignore')
 
         # Write to Zarr store
         data_to_write.to_zarr(filename, mode=mode, region=region, **kwargs)
