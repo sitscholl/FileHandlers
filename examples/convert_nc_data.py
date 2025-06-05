@@ -17,7 +17,7 @@ def main():
     loader = STLoader(r"C:\OneDrive\Scientific Network South Tyrol\Obwegs Lisa - 7. Climate_data")
 
     # Load data with configured preprocessing
-    ds = loader.load("TEMPERATURE/**/*201901.nc", dask = False)
+    ds = loader.load("TEMPERATURE/**/*201901.nc", dask = True, chunks = {'DATE': -1, 'x': 'auto', 'y': 'auto'})
     print(ds)
     print(ds.chunks)
     print(ds.rio.crs)

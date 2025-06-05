@@ -168,7 +168,7 @@ wheels = [
 [[package]]
 name = "filehandler"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "dask", extra = ["array"] },
     { name = "netcdf4" },
