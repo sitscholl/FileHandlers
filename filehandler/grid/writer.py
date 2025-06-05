@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 import rioxarray
+import dask.array as da
 
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union, Any, List
@@ -185,22 +186,33 @@ class GridWriter:
         if not isinstance(variables, dict):
             raise ValueError("The 'variables' parameter must be a dictionary with the following structure: VariableName: VariableType.")
 
-        try:
-            # Create dummy dataset to preallocate a zarr store with necessary metadata but no data
-            dummy = xr.DataArray(np.empty(shape), coords=coords)
+        # Ensure we have chunks to avoid memory issues
+        if chunks is None:
+            chunks = shape #single chunk for each dimension
 
-            if chunks is not None:
-                if len(chunks) != len(shape):
-                    raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
-                dummy = dummy.chunk(chunks)
-                
+        if chunks is not None and len(chunks) != len(shape):
+            raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
+
+        try:
+            
+            # Create a dask array filled with zeros with the specified chunks
+            # This avoids materializing the entire array in memory
+            dask_array = da.zeros(shape, chunks=chunks)
+            
+            # Create the xarray DataArray with the dask array
+            dummy = xr.DataArray(dask_array, coords=coords)
+            
+            # Create a dataset with all variables
             dummy = dummy.expand_dims({'var': list(variables.keys())}).to_dataset(dim='var')
 
+            # Add CRS information
             dummy = dummy.rio.write_crs(crs)
 
+            # Set data types for each variable
             for v, dtype in variables.items():
                 dummy[v] = dummy[v].astype(dtype)
 
+            # Write to zarr without computing the dask array
             dummy.to_zarr(self.root / filename, mode="w", compute=False, encoding=encoding)
 
         except Exception as e:
