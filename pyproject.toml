@@ -1,7 +1,7 @@
 [project]
 name = "filehandler"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python Classes to manage various data loading and writing"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,6 +12,17 @@ dependencies = [
     "xarray>=2024.7.0",
     "zarr>=3.0.8",
 ]
+authors = [
+    {name = "sitscholl", email = "sitscholl@eurac.edu"},
+]
+urls = {Homepage = "https://github.com/sitscholl/FileHandlers"}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["filehandler"]
 
 [dependency-groups]
 dev = [
