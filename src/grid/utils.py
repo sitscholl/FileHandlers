@@ -15,7 +15,6 @@ import rioxarray
 logger = logging.getLogger(__name__)
 
 
-##TODO: Check if dtypes between old and new data corresponds
 def ensure_zarr_store_aligns(
     path: Union[str, Path], 
     data: Union[xr.Dataset, xr.DataArray], 
