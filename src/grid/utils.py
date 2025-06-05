@@ -98,9 +98,16 @@ def ensure_zarr_store_aligns(
             )
 
         # Check if chunking is equal
-        if arr.chunks and data[vname].chunks and arr.chunks != data[vname].chunks:
+        existing_chunks = None
+        new_chunks = None
+        if arr.chunks is not None:
+            existing_chunks = {i for i,j in zip(arr.chunks, arr.dims) if j not in append_dims}
+        if data[vname].chunks is not None:
+            new_chunks = {i for i,j in zip(data[vname].chunks, data[vname].dims) if j not in append_dims}
+
+        if existing_chunks != new_chunks:
             raise ValueError(
-                f"Existing dataset chunks {arr.chunks} do not match expected {data[vname].chunks}."
+                f"Existing dataset chunks: {arr.chunks} do not match expected: {data[vname].chunks}."
             )
 
         # Check if all values of append_dim are present in existing dataset
@@ -112,7 +119,7 @@ def ensure_zarr_store_aligns(
                 )
 
         if arr.dtype != data[vname].dtype:
-            raise ValueError(f"Dtypes between old and new variable '{vname}' do not match. Got {arr.dtype} and {data[vname].dtype}.")
+            logger.warning(f"Dtypes between existing and new variable '{vname}' do not match. Got {arr.dtype} and {data[vname].dtype}. Variables will be automatically transformed to existing dtype.",)
 
     logger.debug("Existing variable in zarr store is correctly aligned with new data.")
 
