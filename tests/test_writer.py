@@ -251,6 +251,28 @@ def test_generate_preallocated_zarr_store(writer: GridWriter, tmp_path: Path):
         assert ds_read['var1'].dtype == float, "Data type of 'var1' not preserved in Zarr store."
         assert ds_read['var2'].dtype == int, "Data type of 'var2' not preserved in Zarr store."
 
+def test_generate_preallocated_zarr_store_chunks_wrong_keys(writer: GridWriter, tmp_path: Path):
+    """Tests generating a preallocated Zarr store."""
+    shape = (10, 5, 5)  # Example shape: (time, height, width)
+    coords = {
+        "time": np.arange(shape[0]),
+        "x": np.linspace(-100, -95, shape[2]),
+        "y": np.linspace(30, 25, shape[1]),
+    }
+    chunks = {'time': -1, 'lon': 2, 'lat': 2}
+    var_dict = {'var1': float, 'var2': int}
+
+    filename = "preallocated_store.zarr"
+    with pytest.raises(Exception) as excinfo:
+        writer.generate_preallocated_zarr_store(
+            filename,
+            shape = shape,
+            coords = coords,
+            crs = 4326,
+            chunks = chunks,
+            encoding = None,
+            variables = var_dict
+        )
 
 def test_generate_preallocated_zarr_store_dtype_encoding(writer: GridWriter, tmp_path: Path):
     """Tests generating a preallocated Zarr store with dtype encoding."""

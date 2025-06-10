@@ -190,13 +190,18 @@ class GridWriter:
         if chunks is None:
             chunks = shape #single chunk for each dimension
 
+        if isinstance(chunks, dict):
+            for i in coords.keys():
+                if i not in chunks:
+                    raise ValueError(f"{i} not found in chunks dictionary! Make sure all coordinate keys are present in the chunks dictionary.")
+            chunks = tuple([chunks[i] for i in coords.keys()])
+
         if chunks is not None and len(chunks) != len(shape):
             raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
 
         try:
             
             # Create a dask array filled with zeros with the specified chunks
-            # This avoids materializing the entire array in memory
             dask_array = da.zeros(shape, chunks=chunks)
             
             # Create the xarray DataArray with the dask array
