@@ -26,7 +26,7 @@ writer.generate_preallocated_zarr_store(
     filename = filename,
     shape = store_shape,
     coords = {'time': all_dates, "lon": np.arange(800), "lat": np.arange(800)},
-    chunks = None,
+    chunks = chunk_structure,
     crs = 32632,
     encoding = encoding,
     variables = {'temperature': np.dtype('int32'), "precipitation": np.dtype('int32')}
@@ -34,3 +34,4 @@ writer.generate_preallocated_zarr_store(
 
 store = xr.open_zarr(zarr_path)
 print(store['temperature'].shape)
+print(store['temperature'].chunks)
