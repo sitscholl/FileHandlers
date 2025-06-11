@@ -159,6 +159,7 @@ class GridWriter:
         chunks: Optional[Tuple[int, ...]] = None,
         encoding: Optional[Dict] = None,
         variables: Optional[Dict[str, type]] = None,
+        dims: Optional[List[str]] = None,
     ) -> None:
         """
         Generate a pre-allocated zarr store with specified dimensions and metadata.
@@ -171,6 +172,7 @@ class GridWriter:
             chunks: Optional tuple specifying chunk sizes
             encoding: Optional dictionary for zarr encoding settings
             variables: Optional dictionary mapping variable names to their data types
+            dims: Optional list of dimension names in the order they should appear in the output
 
         Raises:
             ValueError: If input parameters are invalid
@@ -186,26 +188,39 @@ class GridWriter:
         if not isinstance(variables, dict):
             raise ValueError("The 'variables' parameter must be a dictionary with the following structure: VariableName: VariableType.")
 
+        # If dims is not provided, use the keys from coords
+        if dims is None:
+            dims = list(coords.keys())
+        
+        # Validate that dims match the coordinates
+        if set(dims) != set(coords.keys()):
+            raise ValueError(f"Dimension names {dims} must match coordinate keys {list(coords.keys())}")
+            
+        # Validate that the number of dimensions matches the shape
+        if len(dims) != len(shape):
+            raise ValueError(f"Number of dimensions {len(dims)} must match shape length {len(shape)}")
+
         # Ensure we have chunks to avoid memory issues
         if chunks is None:
-            chunks = shape #single chunk for each dimension
+            chunks = shape  # single chunk for each dimension
 
         if isinstance(chunks, dict):
-            for i in coords.keys():
-                if i not in chunks:
-                    raise ValueError(f"{i} not found in chunks dictionary! Make sure all coordinate keys are present in the chunks dictionary.")
-            chunks = tuple([chunks[i] for i in coords.keys()])
+            # Ensure all dimensions are in the chunks dictionary
+            for dim in dims:
+                if dim not in chunks:
+                    raise ValueError(f"{dim} not found in chunks dictionary! Make sure all dimension names are present in the chunks dictionary.")
+            # Convert chunks dictionary to tuple in the correct dimension order
+            chunks = tuple(chunks[dim] for dim in dims)
 
         if chunks is not None and len(chunks) != len(shape):
             raise ValueError(f"Chunks {chunks} must match shape dimensions {shape}")
 
         try:
-            
             # Create a dask array filled with zeros with the specified chunks
             dask_array = da.zeros(shape, chunks=chunks)
             
-            # Create the xarray DataArray with the dask array
-            dummy = xr.DataArray(dask_array, coords=coords)
+            # Create the xarray DataArray with the dask array and explicit dimension names
+            dummy = xr.DataArray(dask_array, coords=coords, dims=dims)
             
             # Create a dataset with all variables
             dummy = dummy.expand_dims({'var': list(variables.keys())}).to_dataset(dim='var')
