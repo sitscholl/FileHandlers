@@ -251,6 +251,9 @@ def test_generate_preallocated_zarr_store(writer: GridWriter, tmp_path: Path):
         assert ds_read['var1'].dtype == float, "Data type of 'var1' not preserved in Zarr store."
         assert ds_read['var2'].dtype == int, "Data type of 'var2' not preserved in Zarr store."
 
+        assert ds_read['var1'].dims == ('time', 'x', 'y'), 'Dimension order not preserved in var1'
+        assert ds_read['var2'].dims == ('time', 'x', 'y'), 'Dimension order not preserved in var2'
+
 def test_generate_preallocated_zarr_store_chunks_wrong_keys(writer: GridWriter, tmp_path: Path):
     """Tests generating a preallocated Zarr store."""
     shape = (10, 5, 5)  # Example shape: (time, height, width)
@@ -528,6 +531,50 @@ def test_to_zarr_append_along_dimension(writer: GridWriter, tmp_path: Path):
     da2 = create_sample_dataarray(name="data", num_bands=bands, height=height, width=width)
     da2 = da2.expand_dims({"time": new_time_coords})
     da2 = da2.chunk(chunk_structure)
+    
+    # Append to existing store along time dimension
+    writer.to_zarr(da2, filename, append_dims=["time"])
+    
+    # Verify the appended data
+    zarr_path = tmp_path / filename
+    with xr.open_zarr(zarr_path) as ds:
+        assert "data" in ds, "Variable not found in Zarr store."
+        assert ds["data"].shape[0] == 4, f"Expected 4 time steps after append, got {ds['data'].shape[0]}."
+        assert all(t in ds.time.dt.date.values for t in all_time_coords), "Not all time coordinates present after append."
+        assert ds.chunks['time'][0] == len(all_time_coords)
+        assert ds['data'].dims == ('time', 'x', 'y'), 'Dimension order not preserved after append'
+
+def test_to_zarr_different_chunk_structure_append_dim(writer: GridWriter, tmp_path: Path):
+    """Tests appending to an existing Zarr store along a dimension."""
+    # Create initial dataset with time dimension
+    time_coords = [np.datetime64("2023-01-01"), np.datetime64("2023-01-02")]
+    new_time_coords = [np.datetime64("2023-01-03"), np.datetime64("2023-01-04")]
+    all_time_coords = time_coords + new_time_coords
+    bands, height, width = 1, 4, 4
+    store_chunks= {'time': -1, 'x': 2, 'y': 2}
+    array_chunks={'time': 2, 'x': 2, 'y': 2}
+
+    da1 = create_sample_dataarray(name="data", num_bands=bands, height=height, width=width)
+    da1 = da1.expand_dims({"time": time_coords})
+    da1 = da1.chunk(array_chunks)
+    
+    filename = "append_test.zarr"
+    writer.generate_preallocated_zarr_store(
+        filename,
+        shape = (len(all_time_coords), height, width),
+        coords = {'time': all_time_coords, 'x': da1.x, 'y': da1.y},
+        crs = da1.rio.crs.to_epsg(),
+        chunks = store_chunks,
+        variables = {"data": float}
+    )
+    
+    # Write initial data
+    writer.to_zarr(da1, filename, append_dims=["time"])
+    
+    # Create new data with additional time steps
+    da2 = create_sample_dataarray(name="data", num_bands=bands, height=height, width=width)
+    da2 = da2.expand_dims({"time": new_time_coords})
+    da2 = da2.chunk(array_chunks)
     
     # Append to existing store along time dimension
     writer.to_zarr(da2, filename, append_dims=["time"])
