@@ -1,6 +1,6 @@
 [project]
 name = "filehandler"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python Classes to manage various data loading and writing"
 readme = "README.md"
 requires-python = ">=3.13"
